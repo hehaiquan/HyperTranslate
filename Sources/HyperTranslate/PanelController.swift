@@ -48,7 +48,7 @@ final class PanelController {
 
     /// 将小图标显示在捕获位置；保留原文快照，不在点击时重新取词。
     func showIndicator(_ selection: SelectionSnapshot) {
-        guard !state.isPreparing, !panel.isVisible else { return }
+        guard !state.isPreparing else { return }
         snapshot = selection
         let frame = clampedFrame(size: NSSize(width: 36, height: 36),
                                  anchor: selection.anchor, below: true)

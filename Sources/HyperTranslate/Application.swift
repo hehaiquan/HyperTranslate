@@ -54,8 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }.store(in: &subscriptions)
         if CommandLine.arguments.contains("--show-input") {
             panels.show(.input)
-        } else if !UserDefaults.standard.bool(forKey: "completedOnboarding") {
+        } else if !UserDefaults.standard.bool(forKey: "completedOnboarding") || !state.hasAccessibility {
             panels.show(.setup)
+        } else {
+            panels.show(.input)
         }
     }
 
@@ -123,9 +125,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 退出菜单栏应用。
     @objc private func quit() { NSApp.terminate(nil) }
 
-    /// 从 Finder 再次打开时显示手动翻译页面。
+    /// 从 Finder 再次打开时先检查取词权限，避免没有权限却只有菜单栏响应。
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        panels.show(.input)
+        state.hasAccessibility = AXIsProcessTrusted()
+        panels.show(state.hasAccessibility ? .input : .setup)
         return true
     }
 
