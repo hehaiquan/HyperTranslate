@@ -270,7 +270,7 @@ struct SettingsView: View {
                     Button("手动翻译") { state.showPanel?(.input, nil) }.buttonStyle(.borderedProminent)
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("HyperTranslate 1.0.1").font(.system(size: 12, weight: .medium))
+                    Text("HyperTranslate 1.0.2").font(.system(size: 12, weight: .medium))
                     Text("ECDICT · Free Dictionary API / Wiktionary\n不保存翻译历史，只缓存例句及其中文译文。")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                     Button("查看第三方来源与许可") {
@@ -299,6 +299,7 @@ struct SetupView: View {
                         .notice()
                     Button(state.hasAccessibility ? "已授权" : "打开辅助功能设置") { state.requestAccessibility() }
                         .disabled(state.hasAccessibility || state.isPreparing)
+                    Text("取词状态：" + state.selectionStatus).notice().textSelection(.enabled)
                 }
                 setupStep(number: "2", title: "准备英文与中文语言包", ready: translator.availability == .ready) {
                     Text(languageDescription).notice()

@@ -8,17 +8,51 @@ struct SelectionSnapshot {
     let processID: pid_t
 }
 
+struct SelectionCaptureRequest {
+    enum Trigger { case pointer, keyboard }
+    let processID: pid_t
+    let mouse: NSPoint
+    let primaryTop: CGFloat
+    let trigger: Trigger
+
+    /// 使用触发时的位置等待选区稳定，不再采样用户随后移动到的位置。
+    func readAfterDebounce(using reader: (Self) async -> SelectionSnapshot?) async -> SelectionSnapshot? {
+        do { try await Task.sleep(for: .milliseconds(180)) } catch { return nil }
+        guard !Task.isCancelled else { return nil }
+        return await reader(self)
+    }
+
+    /// 鼠标取词校验松开处，键盘取词按选区定位，避免受无关鼠标位置影响。
+    func anchor(for bounds: CGRect?) -> NSPoint? {
+        let fallback = NSPoint(x: mouse.x + 12, y: mouse.y - 12)
+        guard let bounds, bounds.width > 0, bounds.height > 0,
+              bounds.minX.isFinite, bounds.minY.isFinite,
+              bounds.maxX.isFinite, bounds.maxY.isFinite else { return fallback }
+        let converted = NSRect(x: bounds.minX, y: primaryTop - bounds.maxY,
+                               width: bounds.width, height: bounds.height)
+        if trigger == .pointer {
+            // 排除点击其他位置后，目标应用仍暴露的旧选区。
+            guard converted.insetBy(dx: -30, dy: -30).contains(mouse) else { return nil }
+            return NSPoint(x: mouse.x + 12, y: converted.minY - 5)
+        }
+        return NSPoint(x: converted.maxX + 12, y: converted.minY - 5)
+    }
+}
+
 actor SelectionReader {
     /// 在后台串行读取当前应用选区，限制树遍历规模及辅助功能调用超时。
-    func capture(processID: pid_t, mouse: NSPoint, primaryTop: CGFloat) -> SelectionSnapshot? {
-        let application = AXUIElementCreateApplication(processID)
+    func capture(_ request: SelectionCaptureRequest) -> SelectionSnapshot? {
+        let application = AXUIElementCreateApplication(request.processID)
         AXUIElementSetMessagingTimeout(application, 0.12)
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.12)
         let focused = elementAttribute(application, kAXFocusedUIElementAttribute)
             ?? elementAttribute(system, kAXFocusedUIElementAttribute)
         var hit: AXUIElement?
-        AXUIElementCopyElementAtPosition(system, Float(mouse.x), Float(primaryTop - mouse.y), &hit)
+        if request.trigger == .pointer {
+            AXUIElementCopyElementAtPosition(system, Float(request.mouse.x),
+                                            Float(request.primaryTop - request.mouse.y), &hit)
+        }
         // 优先鼠标所在元素，避免某些网页焦点仍留在上一次编辑的输入框。
         var roots: [AXUIElement] = []
         if let hit { roots.append(hit) }
@@ -29,7 +63,7 @@ actor SelectionReader {
                 if Task.isCancelled { return nil }
                 guard let current = candidate else { break }
                 if isSecure(current) { break }
-                if let result = selected(current, processID: processID, mouse: mouse, primaryTop: primaryTop) {
+                if let result = selected(current, request: request) {
                     return result
                 }
                 candidate = elementAttribute(current, kAXParentAttribute)
@@ -44,7 +78,7 @@ actor SelectionReader {
                 let (element, depth) = queue.removeFirst()
                 visited += 1
                 if isSecure(element) { continue }
-                if let result = selected(element, processID: processID, mouse: mouse, primaryTop: primaryTop) {
+                if let result = selected(element, request: request) {
                     return result
                 }
                 if depth < 3, let children = attribute(element, kAXChildrenAttribute) as? [AXUIElement] {
@@ -56,15 +90,14 @@ actor SelectionReader {
     }
 
     /// 读取已选文本和选区矩形，转换为 AppKit 全局坐标。
-    private func selected(_ element: AXUIElement, processID: pid_t,
-                          mouse: NSPoint, primaryTop: CGFloat) -> SelectionSnapshot? {
+    private func selected(_ element: AXUIElement, request: SelectionCaptureRequest) -> SelectionSnapshot? {
         var actualPID: pid_t = 0
         AXUIElementGetPid(element, &actualPID)
-        guard actualPID == processID,
+        guard actualPID == request.processID,
               let text = attribute(element, kAXSelectedTextAttribute) as? String,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               text.range(of: "[A-Za-z]", options: .regularExpression) != nil else { return nil }
-        var anchor = NSPoint(x: mouse.x + 12, y: mouse.y - 12)
+        var selectionBounds: CGRect?
         if let range = attribute(element, kAXSelectedTextRangeAttribute) {
             var bounds: CFTypeRef?
             let status = AXUIElementCopyParameterizedAttributeValue(element,
@@ -73,19 +106,13 @@ actor SelectionReader {
                 let value = bounds as! AXValue
                 var rect = CGRect.zero
                 if AXValueGetType(value) == .cgRect, AXValueGetValue(value, .cgRect, &rect),
-                   rect.width > 0, rect.height > 0, rect.origin.x.isFinite, rect.origin.y.isFinite {
-                    // 在拖选结束处显示，避免长选区图标出现在很远的开头。
-                    let converted = NSRect(x: rect.minX, y: primaryTop - rect.maxY,
-                                           width: rect.width, height: rect.height)
-                    // 点击旧选区以外的位置时，不把残留的选中状态当成新划词。
-                    guard converted.insetBy(dx: -30, dy: -30).contains(mouse) else { return nil }
-                    if converted.insetBy(dx: -30, dy: -30).contains(mouse) {
-                        anchor = NSPoint(x: mouse.x + 12, y: converted.minY - 5)
-                    }
+                   rect.width > 0, rect.height > 0 {
+                    selectionBounds = rect
                 }
             }
         }
-        return SelectionSnapshot(text: text, anchor: anchor, processID: processID)
+        guard let anchor = request.anchor(for: selectionBounds) else { return nil }
+        return SelectionSnapshot(text: text, anchor: anchor, processID: request.processID)
     }
 
     /// 读取辅助功能属性，不使用私有 AX 属性或修改目标应用状态。
@@ -123,23 +150,25 @@ final class SelectionService {
 
     /// 监听鼠标选区结束、外部点击和应用切换，不拦截用户事件。
     func start() {
+        stop()
         let down = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
             self?.invalidate()
             self?.onDismiss?()
         }
         let up = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { [weak self] _ in
-            self?.scheduleCapture()
+            self?.scheduleCapture(trigger: .pointer)
         }
         let keys = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == 53 { self?.invalidate(); self?.onDismiss?() }
             else if event.modifierFlags.contains(.shift) {
-                self?.scheduleCapture()
+                self?.scheduleCapture(trigger: .keyboard)
             } else {
                 self?.invalidate()
                 self?.onDismiss?()
             }
         }
         monitors = [down, up, keys].compactMap { $0 }
+        state?.selectionStatus = down != nil && up != nil ? "正在监听划词" : "取词监听未启动，请重新打开应用"
         workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] notification in
@@ -153,22 +182,29 @@ final class SelectionService {
     }
 
     /// 选区稳定后读取；晚到结果必须与当前应用及查询代次一致。
-    private func scheduleCapture() {
+    private func scheduleCapture(trigger: SelectionCaptureRequest.Trigger) {
         invalidate()
-        guard let state, !state.paused, AXIsProcessTrusted(),
-              let application = NSWorkspace.shared.frontmostApplication,
+        guard let state else { return }
+        guard !state.paused else { state.selectionStatus = "划词已暂停"; return }
+        guard AXIsProcessTrusted() else { state.selectionStatus = "缺少辅助功能授权"; return }
+        guard let application = NSWorkspace.shared.frontmostApplication,
               application.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+        let name = application.localizedName ?? "当前应用"
+        state.selectionStatus = "正在读取 \(name) 选区"
         let identifier = generation.advance()
         let pid = application.processIdentifier
+        let request = SelectionCaptureRequest(processID: pid, mouse: NSEvent.mouseLocation,
+            primaryTop: NSScreen.screens.first?.frame.maxY ?? 0, trigger: trigger)
         pending = Task { [weak self] in
-            do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
             guard let self else { return }
-            let mouse = NSEvent.mouseLocation
-            let top = NSScreen.screens.first?.frame.maxY ?? 0
-            let snapshot = await self.reader.capture(processID: pid, mouse: mouse, primaryTop: top)
+            let snapshot = await request.readAfterDebounce { await self.reader.capture($0) }
             guard !Task.isCancelled, self.generation.contains(identifier), self.state?.paused == false,
-                  NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
-                  let snapshot else { return }
+                  NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
+            guard let snapshot else {
+                self.state?.selectionStatus = "\(name) 未提供可读取的英文选区，可用「翻译剪贴板」"
+                return
+            }
+            self.state?.selectionStatus = "已读取 \(name) 选区"
             self.onSelection?(snapshot)
         }
     }

@@ -9,6 +9,7 @@ final class AppState: ObservableObject {
     @Published var manualText = ""
     @Published var paused = false
     @Published var hasAccessibility = AXIsProcessTrusted()
+    @Published var selectionStatus = "等待选择英文"
     @Published var input: TranslationInput?
     @Published var entry: DictionaryEntry?
     @Published var translation = ""
