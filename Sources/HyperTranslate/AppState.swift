@@ -2,12 +2,28 @@ import AppKit
 import Combine
 import HyperTranslateCore
 
+enum SelectionPopupMode: String, CaseIterable, Identifiable {
+    case manual
+    case automatic
+
+    var id: String { rawValue }
+    var title: String { self == .automatic ? "自动弹出" : "手动弹出" }
+    var explanation: String {
+        self == .automatic
+            ? "选中英文后，直接弹出翻译结果。"
+            : "选中英文后，点击旁边的「译」图标显示结果。"
+    }
+}
+
 @MainActor
 final class AppState: ObservableObject {
-    enum Page { case result, input, settings, setup }
+    enum Page { case result, input, favorites, settings, setup }
     @Published var page: Page = .input
     @Published var manualText = ""
     @Published var paused = false
+    @Published var selectionPopupMode: SelectionPopupMode {
+        didSet { preferences.set(selectionPopupMode.rawValue, forKey: "selectionPopupMode") }
+    }
     @Published var hasAccessibility = AXIsProcessTrusted()
     @Published var selectionStatus = "等待选择英文"
     @Published var input: TranslationInput?
@@ -23,8 +39,10 @@ final class AppState: ObservableObject {
     @Published var isPreparing = false
     let translator = TranslationService()
     let speech = SpeechService()
+    let favorites = FavoriteStore()
     private let exampleService = ExampleService()
     private let dictionary: DictionaryStore?
+    private let preferences: UserDefaults
     private var generation = RequestGeneration()
     private var queryTask: Task<Void, Never>?
     private var preparationTask: Task<Void, Never>?
@@ -35,9 +53,20 @@ final class AppState: ObservableObject {
     var copyText: String { !translation.isEmpty ? translation : entry?.chineseDefinition ?? "" }
 
     /// 初始化离线词典；资源异常时保留手动翻译入口并显示原因。
-    init() {
+    init(preferences: UserDefaults = .standard) {
+        self.preferences = preferences
+        selectionPopupMode = SelectionPopupMode(rawValue: preferences.string(forKey: "selectionPopupMode") ?? "") ?? .manual
         do { dictionary = try DictionaryStore() }
         catch { dictionary = nil; dictionaryMessage = error.localizedDescription }
+    }
+
+    /// 按保存的弹出方式处理有效选区；暂停或准备语言包时不显示图标或启动查询。
+    func presentSelection(_ selection: SelectionSnapshot, showIndicator: (SelectionSnapshot) -> Void) {
+        guard !paused, !isPreparing else { return }
+        switch selectionPopupMode {
+        case .manual: showIndicator(selection)
+        case .automatic: query(selection.text, anchor: selection.anchor)
+        }
     }
 
     /// 开始新查询：立即展示加载状态，先出释义，随后补充例句。
@@ -151,6 +180,16 @@ final class AppState: ObservableObject {
         guard !copyText.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(copyText, forType: .string)
+    }
+
+    /// 切换当前单词的收藏状态，只在释义就绪后新增收藏。
+    func toggleFavorite() {
+        guard let input, input.kind == .word else { return }
+        if favorites.contains(input.text) {
+            favorites.remove(input.text)
+        } else if !isTranslating && !copyText.isEmpty {
+            favorites.add(word: input.text, phonetic: entry?.phonetic ?? "", definition: copyText)
+        }
     }
 
     /// 请求系统辅助功能授权，授权结果由设置页定时刷新。

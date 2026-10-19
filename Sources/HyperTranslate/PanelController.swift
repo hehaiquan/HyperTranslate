@@ -18,7 +18,7 @@ final class PanelController {
     /// 创建唯一翻译宿主和独立取词按钮，两者均不抢占来源应用焦点。
     init(state: AppState) {
         self.state = state
-        panel = TranslationPanel(contentRect: NSRect(x: 0, y: 0, width: 452, height: 580),
+        panel = TranslationPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 720),
                                  styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         indicator = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 36, height: 36),
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -32,7 +32,8 @@ final class PanelController {
             window.isReleasedWhenClosed = false
             window.title = "HyperTranslate"
         }
-        panel.isMovableByWindowBackground = true
+        panel.isMovable = true
+        panel.isMovableByWindowBackground = false
         panel.becomesKeyOnlyIfNeeded = true
         panel.contentView = NSHostingView(rootView: ShellView(state: state, translator: state.translator) { [weak self] in
             self?.hide()
@@ -67,10 +68,13 @@ final class PanelController {
         if page != .result { state.cancelQuery(); state.speech.stop() }
         hideIndicator()
         state.page = page
-        let size = NSSize(width: 452, height: page == .input ? 500 : 590)
+        let size = NSSize(width: 560, height: page == .input ? 640 : 720)
         let screen = screenFor(anchor ?? NSEvent.mouseLocation)
-        let point = anchor ?? NSPoint(x: screen.visibleFrame.midX - size.width / 2,
-                                      y: screen.visibleFrame.midY + size.height / 2)
+        // 浮窗内切换页面保留拖动后的位置；新的划词查询仍跟随选区。
+        let currentOrigin = panel.isVisible && anchor == nil
+            ? NSPoint(x: panel.frame.minX, y: panel.frame.maxY) : nil
+        let point = anchor ?? currentOrigin ?? NSPoint(x: screen.visibleFrame.midX - size.width / 2,
+                                                       y: screen.visibleFrame.midY + size.height / 2)
         panel.setFrame(clampedFrame(size: size, anchor: point, below: true), display: true)
         if page == .result { panel.orderFrontRegardless() }
         else {
@@ -147,10 +151,9 @@ private struct IndicatorView: View {
     var action: () -> Void
     var body: some View {
         Button(action: action) {
-            Text("译").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+            Text("译").font(.system(size: 17, weight: .semibold)).foregroundStyle(.blue)
                 .frame(width: 34, height: 34)
-                .background(Color(red: 0.08, green: 0.49, blue: 0.43), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.2)))
+                .background { TranslationGlassBackground(cornerRadius: 12) }
         }.buttonStyle(.plain).help("翻译选中的英文").accessibilityLabel("翻译选中的英文")
     }
 }

@@ -37,7 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         panels = PanelController(state: state)
         selection = SelectionService(state: state)
-        selection.onSelection = { [weak self] snapshot in self?.panels.showIndicator(snapshot) }
+        selection.onSelection = { [weak self] snapshot in
+            guard let self else { return }
+            self.state.presentSelection(snapshot) { self.panels.showIndicator($0) }
+        }
         selection.onDismiss = { [weak self] in self?.panels.dismissTransient() }
         selection.start()
         createMainMenu()
@@ -51,6 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         state.$hasAccessibility.removeDuplicates().dropFirst().sink { [weak self] _ in
             self?.selection.stop()
             self?.selection.start()
+        }.store(in: &subscriptions)
+        state.$selectionPopupMode.removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.selection.invalidate()
+            self?.panels.dismissTransient()
         }.store(in: &subscriptions)
         if CommandLine.arguments.contains("--show-input") {
             panels.show(.input)
@@ -89,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         menu.addItem(item("手动翻译…", action: #selector(showInput), key: "t"))
         menu.addItem(item("翻译剪贴板", action: #selector(translateClipboard), key: ""))
+        menu.addItem(item("收藏单词…", action: #selector(showFavorites), key: ""))
         menu.addItem(.separator())
         pauseItem = item("暂停划词", action: #selector(togglePause), key: "")
         menu.addItem(pauseItem)
@@ -114,6 +122,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// 打开输入页面。
     @objc private func showInput() { panels.show(.input) }
+    /// 打开本机收藏列表，支持搜索和重新查询单词。
+    @objc private func showFavorites() { panels.show(.favorites) }
     /// 通过明确的菜单操作读取剪贴板并翻译。
     @objc private func translateClipboard() { state.translateClipboard() }
     /// 切换自动划词状态。

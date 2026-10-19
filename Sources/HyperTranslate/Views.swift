@@ -4,7 +4,7 @@ import HyperTranslateCore
 import SwiftUI
 import Translation
 
-private let brand = Color(red: 0.08, green: 0.49, blue: 0.43)
+private let brand = Color.blue
 
 struct ShellView: View {
     @ObservedObject var state: AppState
@@ -14,48 +14,48 @@ struct ShellView: View {
 
     var body: some View {
         let requestID = translator.requestID
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Text("译").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 30, height: 30).background(brand, in: RoundedRectangle(cornerRadius: 9))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("HyperTranslate").font(.system(size: 13, weight: .semibold))
-                    Text("让英文阅读更轻松").font(.system(size: 10)).foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            sidebar
+            Divider().opacity(0.35)
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Image(systemName: "character.bubble.fill")
+                        .font(.system(size: 19, weight: .medium)).foregroundStyle(brand)
+                        .frame(width: 36, height: 36).glassCard(cornerRadius: 12)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("HyperTranslate").font(.system(size: 13, weight: .semibold))
+                        Text("随选随译 · 自在阅读").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer()
-                if state.page == .result {
-                    Button { state.showPanel?(.input, nil) } label: { Image(systemName: "square.and.pencil") }
-                        .help("手动输入")
+                .padding(.horizontal, 22).padding(.vertical, 18)
+                .overlay(WindowDragArea())
+                .help("按住标题栏拖动窗口")
+                Divider().opacity(0.35).padding(.horizontal, 20)
+                Group {
+                    switch state.page {
+                    case .result: ResultView(state: state, speech: state.speech, favorites: state.favorites).id(state.input?.text)
+                    case .input: InputView(state: state)
+                    case .favorites: FavoritesView(state: state, favorites: state.favorites)
+                    case .settings: SettingsView(state: state)
+                    case .setup: SetupView(state: state, translator: translator)
+                    }
                 }
-                Button { state.showPanel?(.settings, nil) } label: { Image(systemName: "gearshape") }
-                    .help("设置").disabled(state.isPreparing)
-                Button(action: close) { Image(systemName: "xmark") }.help("关闭（Esc）")
-                    .disabled(state.isPreparing)
-            }
-            .buttonStyle(.plain).foregroundStyle(.secondary).padding(.horizontal, 22).padding(.vertical, 16)
-            Divider().opacity(0.55)
-            Group {
-                switch state.page {
-                case .result: ResultView(state: state, speech: state.speech).id(state.input?.text)
-                case .input: InputView(state: state)
-                case .settings: SettingsView(state: state)
-                case .setup: SetupView(state: state, translator: translator)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Divider().opacity(0.35).padding(.horizontal, 20)
+                HStack {
+                    Circle().fill(state.paused ? Color.orange : brand).frame(width: 5, height: 5)
+                    Text(state.paused ? "划词已暂停" : "英文 → 中文 · " + state.selectionPopupMode.title)
+                    Spacer()
+                    Text("本地词典 · 系统翻译")
                 }
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .padding(.horizontal, 22).padding(.vertical, 13)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider().opacity(0.55)
-            HStack {
-                Circle().fill(state.paused ? Color.orange : brand).frame(width: 5, height: 5)
-                Text(state.paused ? "划词已暂停" : "英文 → 简体中文")
-                Spacer()
-                Text("本地词典 · 系统翻译")
-            }
-            .font(.system(size: 10)).foregroundStyle(.secondary)
-            .padding(.horizontal, 22).padding(.vertical, 11)
         }
         .tint(brand)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.primary.opacity(0.08)))
+        .background { TranslationGlassBackground() }
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .translationTask(translator.configuration) { session in
             await translator.perform(using: session, requestID: requestID)
         }
@@ -65,11 +65,58 @@ struct ShellView: View {
             if state.hasAccessibility != granted { state.hasAccessibility = granted }
         }
     }
+
+    private var sidebar: some View {
+        VStack(spacing: 14) {
+            Button(action: close) { Image(systemName: "xmark") }
+                .help("关闭（Esc）").accessibilityLabel("关闭")
+                .padding(.bottom, 18)
+            sidebarButton("手动输入", symbol: "square.and.pencil", page: .input)
+            sidebarButton("收藏单词", symbol: "star", page: .favorites)
+            Spacer(minLength: 20)
+            sidebarButton("设置", symbol: "gearshape", page: .settings)
+        }
+        .buttonStyle(GlassToolbarButtonStyle(size: 38))
+        .foregroundStyle(.secondary)
+        .disabled(state.isPreparing)
+        .padding(.vertical, 18)
+        .frame(width: 64)
+        .frame(maxHeight: .infinity)
+        .background(.primary.opacity(0.025))
+    }
+
+    /// 构造左侧导航按钮，以高亮和辅助功能状态标记当前页面。
+    private func sidebarButton(_ title: String, symbol: String, page: AppState.Page) -> some View {
+        Button { state.showPanel?(page, nil) } label: { Image(systemName: symbol) }
+            .foregroundStyle(state.page == page ? brand : Color.secondary)
+            .background(brand.opacity(state.page == page ? 0.12 : 0), in: RoundedRectangle(cornerRadius: 12))
+            .help(title).accessibilityLabel(title)
+            .accessibilityAddTraits(state.page == page ? [.isSelected] : [])
+    }
+}
+
+struct WindowDragArea: NSViewRepresentable {
+    /// 提供独立原生拖动区域，避免 SwiftUI 文本、滚动和按钮吞掉窗口拖动事件。
+    func makeNSView(context: Context) -> WindowDragView { WindowDragView() }
+
+    /// 拖动区域不持有页面状态，页面更新时无需更改原生视图。
+    func updateNSView(_ nsView: WindowDragView, context: Context) {}
+}
+
+final class WindowDragView: NSView {
+    /// 结果浮窗未激活时也接收第一次鼠标按下，允许从来源应用直接拖动。
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// 使用系统窗口拖动，支持非激活浮窗；仅覆盖标题与空白区域。
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+    }
 }
 
 struct ResultView: View {
     @ObservedObject var state: AppState
     @ObservedObject var speech: SpeechService
+    @ObservedObject var favorites: FavoriteStore
     @State private var copied = false
 
     var body: some View {
@@ -80,6 +127,15 @@ struct ResultView: View {
                         HStack {
                             Text(input.kind == .word ? "单词释义" : "原文").sectionLabel()
                             Spacer()
+                            if input.kind == .word {
+                                Button { state.toggleFavorite() } label: {
+                                    Label(favorites.contains(input.text) ? "已收藏" : "收藏",
+                                          systemImage: favorites.contains(input.text) ? "star.fill" : "star")
+                                }
+                                .buttonStyle(.borderless).font(.system(size: 12))
+                                .help(favorites.contains(input.text) ? "取消收藏" : "收藏到本机单词本")
+                                .disabled(!favorites.contains(input.text) && (state.isTranslating || state.copyText.isEmpty))
+                            }
                             Button {
                                 if speech.isSpeaking { speech.stop() }
                                 else { speech.speak(input.text, accent: state.accent) }
@@ -110,7 +166,7 @@ struct ResultView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading).padding(16)
-                        .background(brand.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+                        .glassCard()
                         Text("释义与音标：ECDICT；词库音标不一定与朗读口音一致。")
                             .font(.system(size: 10)).foregroundStyle(.tertiary)
                     }
@@ -119,7 +175,7 @@ struct ResultView: View {
                             Text("中文译文").sectionLabel()
                             Text(state.translation).font(.system(size: 16)).lineSpacing(7).textSelection(.enabled)
                         }.frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(16).background(brand.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+                            .padding(16).glassCard()
                     }
                     if state.isTranslating { loading("正在本地查询与翻译…") }
                     if input.kind == .word {
@@ -168,6 +224,7 @@ struct ResultView: View {
                         .foregroundStyle(.orange).textSelection(.enabled)
                 }
                 if let message = state.dictionaryMessage { Text(message).notice() }
+                if let message = favorites.errorMessage { Text(message).notice() }
                 HStack(spacing: 12) {
                     Button {
                         state.copyTranslation()
@@ -203,6 +260,67 @@ struct ResultView: View {
     }
 }
 
+struct FavoritesView: View {
+    @ObservedObject var state: AppState
+    @ObservedObject var favorites: FavoriteStore
+    @State private var searchText = ""
+
+    private var filteredWords: [FavoriteWord] {
+        let search = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return search.isEmpty ? favorites.words : favorites.words.filter {
+            $0.word.localizedCaseInsensitiveContains(search) || $0.definition.localizedCaseInsensitiveContains(search)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("收藏单词").font(.system(size: 23, weight: .semibold, design: .rounded))
+                Spacer()
+                Text("\(favorites.words.count) 个").font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            TextField("搜索单词或中文释义", text: $searchText)
+                .textFieldStyle(.roundedBorder).accessibilityLabel("搜索收藏单词")
+            if let message = favorites.errorMessage { Text(message).notice() }
+            if filteredWords.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "star").font(.system(size: 30)).foregroundStyle(brand)
+                    Text(favorites.words.isEmpty ? "还没有收藏单词" : "没有找到匹配的收藏")
+                        .font(.system(size: 14, weight: .medium))
+                    Text(favorites.words.isEmpty ? "查词后点击「收藏」，在这里随时复习。" : "试试其他单词或中文释义。")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(filteredWords) { favorite in
+                            HStack(alignment: .top, spacing: 12) {
+                                Button { state.query(favorite.word) } label: {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(favorite.word).font(.system(size: 19, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(brand)
+                                        if !favorite.phonetic.isEmpty {
+                                            Text(favorite.phonetic).font(.system(size: 12)).foregroundStyle(.secondary)
+                                        }
+                                        Text(favorite.definition).font(.system(size: 13)).foregroundStyle(.primary)
+                                            .lineSpacing(4).lineLimit(3)
+                                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                                }.buttonStyle(.plain).help("重新查询 " + favorite.word)
+                                Button { favorites.remove(favorite.word) } label: {
+                                    Image(systemName: "star.fill").foregroundStyle(brand)
+                                }.buttonStyle(.plain).help("取消收藏 " + favorite.word)
+                                    .accessibilityLabel("取消收藏 " + favorite.word)
+                            }.padding(14)
+                                .glassCard()
+                        }
+                    }
+                }
+            }
+            Text("收藏保存在本机 · 点击单词重新查询").font(.system(size: 10)).foregroundStyle(.secondary)
+        }.padding(22)
+    }
+}
+
 struct InputView: View {
     @ObservedObject var state: AppState
     @FocusState private var isFocused: Bool
@@ -210,12 +328,11 @@ struct InputView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("读到哪里，译到哪里").font(.system(size: 23, weight: .semibold, design: .rounded))
-            Text("选中英文，点击旁边的「译」图标。\n也可以在这里输入单词、句子或一段文字。")
+            Text(state.selectionPopupMode.explanation + "\n也可以在这里输入单词、句子或一段文字。")
                 .font(.system(size: 13)).foregroundStyle(.secondary).lineSpacing(5)
             TextEditor(text: $state.manualText).font(.system(size: 15))
                 .scrollContentBackground(.hidden).padding(12)
-                .background(.background.opacity(0.7), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(.primary.opacity(0.10)))
+                .glassCard()
                 .focused($isFocused).frame(minHeight: 120)
                 .accessibilityLabel("输入英文单词、句子或段落")
             HStack {
@@ -242,16 +359,29 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 23) {
+            VStack(alignment: .leading, spacing: 18) {
                 Text("按你的习惯阅读").font(.system(size: 22, weight: .semibold, design: .rounded))
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("划词与翻译").sectionLabel()
-                    Toggle("暂停自动划词图标", isOn: $state.paused)
+                    Label("选中后如何弹出", systemImage: "cursorarrow.rays")
+                        .font(.system(size: 13, weight: .semibold))
+                    Picker("弹出方式", selection: $state.selectionPopupMode) {
+                        ForEach(SelectionPopupMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }.pickerStyle(.segmented).labelsHidden()
+                        .accessibilityLabel("选中英文后的弹出方式")
+                    Text(state.selectionPopupMode.explanation).notice()
+                    Divider().opacity(0.5)
+                    Toggle("暂停划词", isOn: $state.paused)
+                    Text("暂停后，两种模式均不触发；仍可手动输入或翻译剪贴板。")
+                        .notice()
+                }.padding(16).glassCard()
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("例句与翻译").sectionLabel()
                     Toggle("联网补充英文例句", isOn: $onlineExamples)
                     Text("仅查询的单词会发送到 Free Dictionary API。整句翻译在本机完成；关闭此项后不读取例句缓存。")
                         .notice()
-                }
-                Divider()
+                }.padding(16).glassCard()
                 VStack(alignment: .leading, spacing: 12) {
                     Text("英语朗读").sectionLabel()
                     Picker("口音", selection: $accent) {
@@ -262,15 +392,14 @@ struct SettingsView: View {
                         .buttonStyle(.borderless)
                     Text("使用系统合成语音。词库音标单独提供，缺失时不会根据朗读推测音标。")
                         .notice()
-                }
-                Divider()
+                }.padding(16).glassCard()
                 HStack {
                     Button("权限与语言包") { state.showPanel?(.setup, nil) }
                     Spacer()
                     Button("手动翻译") { state.showPanel?(.input, nil) }.buttonStyle(.borderedProminent)
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("HyperTranslate 1.0.2").font(.system(size: 12, weight: .medium))
+                    Text("HyperTranslate 1.0.6").font(.system(size: 12, weight: .medium))
                     Text("ECDICT · Free Dictionary API / Wiktionary\n不保存翻译历史，只缓存例句及其中文译文。")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                     Button("查看第三方来源与许可") {
