@@ -73,6 +73,15 @@ struct ShellView: View {
                 .padding(.bottom, 18)
             sidebarButton("手动输入", symbol: "square.and.pencil", page: .input)
             sidebarButton("收藏单词", symbol: "star", page: .favorites)
+            Button { state.isPanelPinned.toggle() } label: {
+                Image(systemName: state.isPanelPinned ? "pin.fill" : "pin")
+            }
+            .foregroundStyle(state.isPanelPinned ? brand : Color.secondary)
+            .background(brand.opacity(state.isPanelPinned ? 0.12 : 0), in: RoundedRectangle(cornerRadius: 12))
+            .help(state.isPanelPinned ? "取消置顶" : "钉在最前面")
+            .accessibilityLabel("钉在最前面")
+            .accessibilityValue(state.isPanelPinned ? "已开启" : "已关闭")
+            .accessibilityAddTraits(state.isPanelPinned ? [.isSelected] : [])
             Spacer(minLength: 20)
             sidebarButton("设置", symbol: "gearshape", page: .settings)
         }

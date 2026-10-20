@@ -21,6 +21,9 @@ final class AppState: ObservableObject {
     @Published var page: Page = .input
     @Published var manualText = ""
     @Published var paused = false
+    @Published var isPanelPinned: Bool {
+        didSet { preferences.set(isPanelPinned, forKey: "isPanelPinned") }
+    }
     @Published var selectionPopupMode: SelectionPopupMode {
         didSet { preferences.set(selectionPopupMode.rawValue, forKey: "selectionPopupMode") }
     }
@@ -55,6 +58,7 @@ final class AppState: ObservableObject {
     /// 初始化离线词典；资源异常时保留手动翻译入口并显示原因。
     init(preferences: UserDefaults = .standard) {
         self.preferences = preferences
+        isPanelPinned = preferences.bool(forKey: "isPanelPinned")
         selectionPopupMode = SelectionPopupMode(rawValue: preferences.string(forKey: "selectionPopupMode") ?? "") ?? .manual
         do { dictionary = try DictionaryStore() }
         catch { dictionary = nil; dictionaryMessage = error.localizedDescription }

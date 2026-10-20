@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 final class TranslationPanel: NSPanel {
@@ -14,11 +15,12 @@ final class PanelController {
     private var snapshot: SelectionSnapshot?
     private var escapeMonitor: Any?
     private var indicatorTimeout: Task<Void, Never>?
+    private var pinSubscription: AnyCancellable?
 
-    /// 创建唯一翻译宿主和独立取词按钮，两者均不抢占来源应用焦点。
-    init(state: AppState) {
+    /// 创建唯一翻译宿主和独立取词按钮；允许注入宿主窗口验证生命周期行为。
+    init(state: AppState, window: TranslationPanel? = nil) {
         self.state = state
-        panel = TranslationPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 720),
+        panel = window ?? TranslationPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 720),
                                  styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         indicator = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 36, height: 36),
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -40,6 +42,9 @@ final class PanelController {
         })
         indicator.contentView = NSHostingView(rootView: IndicatorView { [weak self] in self?.translateSelection() })
         state.showPanel = { [weak self] page, anchor in self?.show(page, anchor: anchor) }
+        pinSubscription = state.$isPanelPinned.removeDuplicates().sink { [weak self] pinned in
+            self?.panel.level = pinned ? .floating : .normal
+        }
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53, self?.state.isPreparing == false else { return event }
             self?.hide()
@@ -70,10 +75,10 @@ final class PanelController {
         state.page = page
         let size = NSSize(width: 560, height: page == .input ? 640 : 720)
         let screen = screenFor(anchor ?? NSEvent.mouseLocation)
-        // 浮窗内切换页面保留拖动后的位置；新的划词查询仍跟随选区。
-        let currentOrigin = panel.isVisible && anchor == nil
+        // 置顶期间沿用拖动后的位置；未置顶的新划词查询仍跟随选区。
+        let currentOrigin = panel.isVisible && (state.isPanelPinned || anchor == nil)
             ? NSPoint(x: panel.frame.minX, y: panel.frame.maxY) : nil
-        let point = anchor ?? currentOrigin ?? NSPoint(x: screen.visibleFrame.midX - size.width / 2,
+        let point = currentOrigin ?? anchor ?? NSPoint(x: screen.visibleFrame.midX - size.width / 2,
                                                        y: screen.visibleFrame.midY + size.height / 2)
         panel.setFrame(clampedFrame(size: size, anchor: point, below: true), display: true)
         if page == .result { panel.orderFrontRegardless() }
@@ -83,15 +88,15 @@ final class PanelController {
         }
     }
 
-    /// 对外部点击或应用切换关闭临时结果，系统下载提示期间保持宿主存活。
+    /// 外部点击或应用切换时关闭临时结果；置顶或系统下载提示期间保留宿主。
     func dismissTransient() {
         hideIndicator()
-        guard state.page == .result, !state.isPreparing,
+        guard state.page == .result, !state.isPanelPinned, !state.isPreparing,
               !(state.translator.isWorking && state.translator.availability != .ready) else { return }
         hide()
     }
 
-    /// 暂停时立即移除所有划词结果。
+    /// 暂停时移除临时划词结果，保留用户置顶的窗口。
     func pauseChanged() { if state.paused { dismissTransient() } }
 
     /// 关闭浮窗并取消当前查询与朗读。
@@ -140,6 +145,8 @@ final class PanelController {
 
     /// 退出时移除监听和隐藏窗口。
     func stop() {
+        pinSubscription?.cancel()
+        pinSubscription = nil
         hideIndicator()
         panel.orderOut(nil)
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
