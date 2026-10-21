@@ -18,13 +18,13 @@ struct TranslationGlassBackground: View {
                 NativeGlassMaterial()
             }
             if !reduceTransparency {
-                LinearGradient(colors: [.white.opacity(colorScheme == .dark ? 0.10 : 0.30), .clear,
-                                        .white.opacity(0.03)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                Color(nsColor: .windowBackgroundColor).opacity(colorScheme == .dark ? 0.58 : 0.76)
+                LinearGradient(colors: [.white.opacity(colorScheme == .dark ? 0.04 : 0.14), .clear],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
             }
         }
         .clipShape(shape)
-        .overlay(shape.strokeBorder(.white.opacity(colorScheme == .dark ? 0.18 : 0.58), lineWidth: 1))
-        .overlay(shape.inset(by: 1).strokeBorder(.primary.opacity(0.04), lineWidth: 1))
+        .overlay(shape.strokeBorder(.white.opacity(colorScheme == .dark ? 0.14 : 0.38), lineWidth: 1))
         .allowsHitTesting(false)
     }
 }
@@ -53,40 +53,44 @@ private struct GlassCard: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         content
             .background(Color(nsColor: .controlBackgroundColor)
-                .opacity(reduceTransparency ? 1 : colorScheme == .dark ? 0.48 : 0.64), in: shape)
-            .overlay(shape.strokeBorder(.white.opacity(colorScheme == .dark ? 0.10 : 0.55)))
+                .opacity(reduceTransparency ? 1 : colorScheme == .dark ? 0.72 : 0.82), in: shape)
+            .overlay(shape.strokeBorder(.primary.opacity(colorScheme == .dark ? 0.10 : 0.07)))
     }
 }
 
 extension View {
     /// 为输入、释义和设置区块应用统一的玻璃内卡片样式。
-    func glassCard(cornerRadius: CGFloat = 18) -> some View {
+    func glassCard(cornerRadius: CGFloat = 14) -> some View {
         modifier(GlassCard(cornerRadius: cornerRadius))
     }
 }
 
 struct GlassToolbarButtonStyle: ButtonStyle {
     var size: CGFloat = 30
+    var isSelected = false
 
-    /// 统一工具栏按钮的圆形点击区域，并保留按下时的系统反馈。
+    /// 使用统一圆角承载导航选中、悬停和按下状态，避免叠加不同形状的底板。
     func makeBody(configuration: Configuration) -> some View {
-        GlassToolbarButton(configuration: configuration, size: size)
+        GlassToolbarButton(configuration: configuration, size: size, isSelected: isSelected)
     }
 }
 
 private struct GlassToolbarButton: View {
     let configuration: ButtonStyleConfiguration
     let size: CGFloat
+    let isSelected: Bool
     @Environment(\.isEnabled) private var isEnabled
     @State private var isHovered = false
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
         configuration.label
-            .font(.system(size: 13, weight: .medium))
+            .font(.system(size: 14, weight: .medium))
             .frame(width: size, height: size)
-            .background(.primary.opacity(configuration.isPressed ? 0.14 : isHovered && isEnabled ? 0.08 : 0.035), in: Circle())
-            .overlay(Circle().strokeBorder(.white.opacity(0.16)))
-            .contentShape(Circle())
+            .background(Color.accentColor.opacity(isSelected ? 0.12 : 0), in: shape)
+            .background(.primary.opacity(configuration.isPressed ? 0.12 : isHovered && isEnabled ? 0.06 : 0), in: shape)
+            .overlay(shape.strokeBorder(Color.accentColor.opacity(isSelected ? 0.12 : 0)))
+            .contentShape(shape)
             .opacity(isEnabled ? 1 : 0.4)
             .onHover { isHovered = $0 }
     }

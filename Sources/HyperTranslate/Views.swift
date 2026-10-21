@@ -21,17 +21,17 @@ struct ShellView: View {
                 HStack(spacing: 10) {
                     Image(systemName: "character.bubble.fill")
                         .font(.system(size: 19, weight: .medium)).foregroundStyle(brand)
-                        .frame(width: 36, height: 36).glassCard(cornerRadius: 12)
+                        .frame(width: 34, height: 34).glassCard(cornerRadius: 10)
                     VStack(alignment: .leading, spacing: 1) {
                         Text("HyperTranslate").font(.system(size: 13, weight: .semibold))
                         Text("随选随译 · 自在阅读").font(.system(size: 10)).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 22).padding(.vertical, 18)
+                .padding(.horizontal, 24).padding(.vertical, 16)
                 .overlay(WindowDragArea())
                 .help("按住标题栏拖动窗口")
-                Divider().opacity(0.35).padding(.horizontal, 20)
+                Divider().opacity(0.25).padding(.horizontal, 24)
                 Group {
                     switch state.page {
                     case .result: ResultView(state: state, speech: state.speech, favorites: state.favorites).id(state.input?.text)
@@ -42,7 +42,7 @@ struct ShellView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                Divider().opacity(0.35).padding(.horizontal, 20)
+                Divider().opacity(0.25).padding(.horizontal, 24)
                 HStack {
                     Circle().fill(state.paused ? Color.orange : brand).frame(width: 5, height: 5)
                     Text(state.paused ? "划词已暂停" : "英文 → 中文 · " + state.selectionPopupMode.title)
@@ -50,7 +50,7 @@ struct ShellView: View {
                     Text("本地词典 · 系统翻译")
                 }
                 .font(.system(size: 10)).foregroundStyle(.secondary)
-                .padding(.horizontal, 22).padding(.vertical, 13)
+                .padding(.horizontal, 24).padding(.vertical, 12)
             }
         }
         .tint(brand)
@@ -77,7 +77,7 @@ struct ShellView: View {
                 Image(systemName: state.isPanelPinned ? "pin.fill" : "pin")
             }
             .foregroundStyle(state.isPanelPinned ? brand : Color.secondary)
-            .background(brand.opacity(state.isPanelPinned ? 0.12 : 0), in: RoundedRectangle(cornerRadius: 12))
+            .buttonStyle(GlassToolbarButtonStyle(size: 38, isSelected: state.isPanelPinned))
             .help(state.isPanelPinned ? "取消置顶" : "钉在最前面")
             .accessibilityLabel("钉在最前面")
             .accessibilityValue(state.isPanelPinned ? "已开启" : "已关闭")
@@ -98,7 +98,7 @@ struct ShellView: View {
     private func sidebarButton(_ title: String, symbol: String, page: AppState.Page) -> some View {
         Button { state.showPanel?(page, nil) } label: { Image(systemName: symbol) }
             .foregroundStyle(state.page == page ? brand : Color.secondary)
-            .background(brand.opacity(state.page == page ? 0.12 : 0), in: RoundedRectangle(cornerRadius: 12))
+            .buttonStyle(GlassToolbarButtonStyle(size: 38, isSelected: state.page == page))
             .help(title).accessibilityLabel(title)
             .accessibilityAddTraits(state.page == page ? [.isSelected] : [])
     }
@@ -273,6 +273,7 @@ struct FavoritesView: View {
     @ObservedObject var state: AppState
     @ObservedObject var favorites: FavoriteStore
     @State private var searchText = ""
+    @FocusState private var isSearchFocused: Bool
 
     private var filteredWords: [FavoriteWord] {
         let search = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -282,16 +283,34 @@ struct FavoritesView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("收藏单词").font(.system(size: 23, weight: .semibold, design: .rounded))
+        let words = filteredWords
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("收藏单词").font(.system(size: 22, weight: .semibold))
                 Spacer()
-                Text("\(favorites.words.count) 个").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("\(favorites.words.count) 个").font(.system(size: 12)).monospacedDigit().foregroundStyle(.secondary)
             }
-            TextField("搜索单词或中文释义", text: $searchText)
-                .textFieldStyle(.roundedBorder).accessibilityLabel("搜索收藏单词")
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("搜索单词或中文释义", text: $searchText)
+                    .textFieldStyle(.plain).focused($isSearchFocused)
+                    .accessibilityLabel("搜索收藏单词")
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                        isSearchFocused = true
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }.buttonStyle(.plain).help("清除搜索").accessibilityLabel("清除搜索")
+                }
+            }
+            .font(.system(size: 13))
+            .padding(.horizontal, 12).frame(height: 38)
+            .glassCard(cornerRadius: 10)
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(brand.opacity(isSearchFocused ? 0.45 : 0)))
             if let message = favorites.errorMessage { Text(message).notice() }
-            if filteredWords.isEmpty {
+            if words.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "star").font(.system(size: 30)).foregroundStyle(brand)
                     Text(favorites.words.isEmpty ? "还没有收藏单词" : "没有找到匹配的收藏")
@@ -301,32 +320,53 @@ struct FavoritesView: View {
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(filteredWords) { favorite in
-                            HStack(alignment: .top, spacing: 12) {
-                                Button { state.query(favorite.word) } label: {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Text(favorite.word).font(.system(size: 19, weight: .semibold, design: .rounded))
-                                            .foregroundStyle(brand)
-                                        if !favorite.phonetic.isEmpty {
-                                            Text(favorite.phonetic).font(.system(size: 12)).foregroundStyle(.secondary)
-                                        }
-                                        Text(favorite.definition).font(.system(size: 13)).foregroundStyle(.primary)
-                                            .lineSpacing(4).lineLimit(3)
-                                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                                }.buttonStyle(.plain).help("重新查询 " + favorite.word)
-                                Button { favorites.remove(favorite.word) } label: {
-                                    Image(systemName: "star.fill").foregroundStyle(brand)
-                                }.buttonStyle(.plain).help("取消收藏 " + favorite.word)
-                                    .accessibilityLabel("取消收藏 " + favorite.word)
-                            }.padding(14)
-                                .glassCard()
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(words.enumerated()), id: \.element.id) { index, favorite in
+                            FavoriteWordRow(favorite: favorite,
+                                            query: { state.query(favorite.word) },
+                                            remove: { favorites.remove(favorite.word) })
+                            if index < words.count - 1 {
+                                Divider().opacity(0.45).padding(.horizontal, 16)
+                            }
                         }
                     }
                 }
+                .glassCard()
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-            Text("收藏保存在本机 · 点击单词重新查询").font(.system(size: 10)).foregroundStyle(.secondary)
-        }.padding(22)
+            Label("收藏保存在本机 · 点击单词重新查询", systemImage: "internaldrive")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+        }.padding(24)
+    }
+}
+
+/// 在同一阅读底板中展示收藏行，统一文字层级与独立收藏按钮的点击范围。
+private struct FavoriteWordRow: View {
+    let favorite: FavoriteWord
+    let query: () -> Void
+    let remove: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: query) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(favorite.word).font(.system(size: 17, weight: .semibold)).foregroundStyle(.primary)
+                    if !favorite.phonetic.isEmpty {
+                        Text(favorite.phonetic).font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    Text(favorite.definition).font(.system(size: 13)).foregroundStyle(.primary)
+                        .lineSpacing(3).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain).help("重新查询 " + favorite.word)
+            Button(action: remove) {
+                Image(systemName: "star.fill").foregroundStyle(brand.opacity(0.75))
+            }.buttonStyle(GlassToolbarButtonStyle(size: 28))
+                .help("取消收藏 " + favorite.word).accessibilityLabel("取消收藏 " + favorite.word)
+        }
+        .padding(16)
+        .background(.primary.opacity(isHovered ? 0.035 : 0))
+        .onHover { isHovered = $0 }
     }
 }
 
@@ -336,7 +376,7 @@ struct InputView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("读到哪里，译到哪里").font(.system(size: 23, weight: .semibold, design: .rounded))
+            Text("读到哪里，译到哪里").font(.system(size: 22, weight: .semibold))
             Text(state.selectionPopupMode.explanation + "\n也可以在这里输入单词、句子或一段文字。")
                 .font(.system(size: 13)).foregroundStyle(.secondary).lineSpacing(5)
             TextEditor(text: $state.manualText).font(.system(size: 15))
@@ -369,7 +409,7 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("按你的习惯阅读").font(.system(size: 22, weight: .semibold, design: .rounded))
+                Text("按你的习惯阅读").font(.system(size: 22, weight: .semibold))
                 VStack(alignment: .leading, spacing: 12) {
                     Label("选中后如何弹出", systemImage: "cursorarrow.rays")
                         .font(.system(size: 13, weight: .semibold))
@@ -429,7 +469,7 @@ struct SetupView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                Text("两步，开始轻松阅读").font(.system(size: 23, weight: .semibold, design: .rounded))
+                Text("两步，开始轻松阅读").font(.system(size: 22, weight: .semibold))
                 Text("单词释义与音标已经内置。完成以下准备，即可在其他应用划词，并离线翻译句子。")
                     .font(.system(size: 13)).foregroundStyle(.secondary).lineSpacing(4)
                 setupStep(number: "1", title: "允许读取选中文字", ready: state.hasAccessibility) {
