@@ -331,6 +331,8 @@ struct FavoritesView: View {
                         }
                     }
                 }
+                // 为列表内容与系统滚动条之间预留空隙，避免收藏按钮贴近右侧。
+                .contentMargins(.trailing, 12, for: .scrollContent)
                 .glassCard()
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
