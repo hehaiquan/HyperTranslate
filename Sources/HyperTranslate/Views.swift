@@ -397,6 +397,12 @@ struct InputView: View {
             HStack {
                 Text("\(state.manualText.count) / 12,000").font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
+                Button("清除内容") {
+                    state.manualText = ""
+                    isFocused = true
+                }
+                .disabled(state.manualText.isEmpty)
+                .help("清空输入框，重新输入英文")
                 Button("翻译") { state.query(state.manualText) }.buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(state.manualText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -458,7 +464,7 @@ struct SettingsView: View {
                     Button("手动翻译") { state.showPanel?(.input, nil) }.buttonStyle(.borderedProminent)
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("HyperTranslate 1.0.6").font(.system(size: 12, weight: .medium))
+                    Text("HyperTranslate 1.0.8").font(.system(size: 12, weight: .medium))
                     Text("ECDICT · Free Dictionary API / Wiktionary\n不保存翻译历史，只缓存例句及其中文译文。")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                     Button("查看第三方来源与许可") {
