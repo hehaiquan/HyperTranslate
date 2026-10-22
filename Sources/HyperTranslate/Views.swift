@@ -31,6 +31,9 @@ struct ShellView: View {
                 .padding(.horizontal, 24).padding(.vertical, 16)
                 .overlay(WindowDragArea())
                 .help("按住标题栏拖动窗口")
+                .overlay(alignment: .trailing) {
+                    pinButton.padding(.trailing, 24)
+                }
                 Divider().opacity(0.25).padding(.horizontal, 24)
                 Group {
                     switch state.page {
@@ -73,15 +76,6 @@ struct ShellView: View {
                 .padding(.bottom, 18)
             sidebarButton("手动输入", symbol: "square.and.pencil", page: .input)
             sidebarButton("收藏单词", symbol: "star", page: .favorites)
-            Button { state.isPanelPinned.toggle() } label: {
-                Image(systemName: state.isPanelPinned ? "pin.fill" : "pin")
-            }
-            .foregroundStyle(state.isPanelPinned ? brand : Color.secondary)
-            .buttonStyle(GlassToolbarButtonStyle(size: 38, isSelected: state.isPanelPinned))
-            .help(state.isPanelPinned ? "取消置顶" : "钉在最前面")
-            .accessibilityLabel("钉在最前面")
-            .accessibilityValue(state.isPanelPinned ? "已开启" : "已关闭")
-            .accessibilityAddTraits(state.isPanelPinned ? [.isSelected] : [])
             Spacer(minLength: 20)
             sidebarButton("设置", symbol: "gearshape", page: .settings)
         }
@@ -92,6 +86,20 @@ struct ShellView: View {
         .frame(width: 64)
         .frame(maxHeight: .infinity)
         .background(.primary.opacity(0.025))
+    }
+
+    /// 将置顶按钮放在标题栏右上角，独立于拖动区域接收点击。
+    private var pinButton: some View {
+        Button { state.isPanelPinned.toggle() } label: {
+            Image(systemName: state.isPanelPinned ? "pin.fill" : "pin")
+        }
+        .foregroundStyle(state.isPanelPinned ? brand : Color.secondary)
+        .buttonStyle(GlassToolbarButtonStyle(size: 38, isSelected: state.isPanelPinned))
+        .help(state.isPanelPinned ? "取消置顶" : "钉在最前面")
+        .accessibilityLabel("钉在最前面")
+        .accessibilityValue(state.isPanelPinned ? "已开启" : "已关闭")
+        .accessibilityAddTraits(state.isPanelPinned ? [.isSelected] : [])
+        .disabled(state.isPreparing)
     }
 
     /// 构造左侧导航按钮，以高亮和辅助功能状态标记当前页面。
