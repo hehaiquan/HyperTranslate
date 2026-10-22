@@ -67,4 +67,100 @@ final class SelectionCaptureTests: XCTestCase {
         XCTAssertNil(snapshot)
         XCTAssertFalse(read)
     }
+
+    /// 浏览器首次尚未暴露选区时重试，仍沿用松开时的来源与坐标。
+    func testDelayedBrowserSelectionRetriesWithOriginalRequest() async {
+        let request = SelectionCaptureRequest(processID: 42, mouse: NSPoint(x: 140, y: 790),
+            primaryTop: 1000, trigger: .pointer)
+        var attempts = 0
+        let snapshot = await request.readAfterDebounce { captured in
+            attempts += 1
+            XCTAssertEqual(captured.processID, 42)
+            XCTAssertEqual(captured.mouse, request.mouse)
+            XCTAssertEqual(captured.primaryTop, 1000)
+            XCTAssertEqual(captured.trigger, .pointer)
+            guard attempts == 2 else { return nil }
+            return SelectionSnapshot(text: "prioritize", anchor: captured.mouse, processID: captured.processID)
+        }
+        XCTAssertEqual(attempts, 2)
+        XCTAssertEqual(snapshot?.text, "prioritize")
+    }
+
+    /// 应用持续没有选区时只读两次，避免无限重试或不断触发界面。
+    func testMissingSelectionStopsAfterOneRetry() async {
+        let request = SelectionCaptureRequest(processID: 42, mouse: .zero,
+            primaryTop: 1000, trigger: .keyboard)
+        var attempts = 0
+        let snapshot = await request.readAfterDebounce { _ in attempts += 1; return nil }
+        XCTAssertNil(snapshot)
+        XCTAssertEqual(attempts, 2)
+    }
+
+    /// 第一轮失败后发生新选择或切换应用取消任务，不再读取第二轮旧选区。
+    func testCancellationAfterFirstAttemptPreventsRetry() async {
+        let request = SelectionCaptureRequest(processID: 42, mouse: .zero,
+            primaryTop: 1000, trigger: .pointer)
+        var attempts = 0
+        let task = Task {
+            await request.readAfterDebounce { _ in
+                attempts += 1
+                withUnsafeCurrentTask { $0?.cancel() }
+                return nil
+            }
+        }
+        let snapshot = await task.value
+        XCTAssertNil(snapshot)
+        XCTAssertEqual(attempts, 1)
+    }
+
+    /// AX 读取期间任务被取消，即使读到了文本也不能交给浮窗。
+    func testCancellationDuringReadDiscardsReturnedSelection() async {
+        let request = SelectionCaptureRequest(processID: 42, mouse: .zero,
+            primaryTop: 1000, trigger: .pointer)
+        let task = Task {
+            await request.readAfterDebounce { _ in
+                withUnsafeCurrentTask { $0?.cancel() }
+                return SelectionSnapshot(text: "stale", anchor: .zero, processID: 42)
+            }
+        }
+        let snapshot = await task.value
+        XCTAssertNil(snapshot)
+    }
+
+    /// 已有选中文字时不访问范围接口，保留原文的空白和标点。
+    func testDirectSelectedTextDoesNotReadRange() {
+        XCTAssertEqual(SelectionText.read(direct: " prioritize ", range: nil) {
+            XCTFail("已有文本不应重复读取范围")
+            return nil
+        }, " prioritize ")
+    }
+
+    /// 只暴露选区范围的应用通过范围接口取词，空白直读结果也能降级。
+    func testSelectedRangeFallbackWhenDirectTextIsMissing() {
+        for direct: String? in [nil, "", " \n"] {
+            XCTAssertEqual(SelectionText.read(direct: direct, range: CFRange(location: 7, length: 10)) {
+                "prioritize"
+            }, "prioritize")
+        }
+    }
+
+    /// 缺少范围、空光标、负位置和溢出范围不得读成整段或整页文字。
+    func testInvalidOrEmptyRangeNeverReadsText() {
+        let ranges: [CFRange?] = [nil, CFRange(location: 0, length: 0),
+            CFRange(location: -1, length: 10), CFRange(location: 0, length: -1),
+            CFRange(location: Int.max, length: 2)]
+        for range in ranges {
+            XCTAssertNil(SelectionText.read(direct: nil, range: range) {
+                XCTFail("无效范围不应读取文字")
+                return "entire page"
+            })
+        }
+    }
+
+    /// 范围接口失败或只返回非英文时，不产生虚假有效选区。
+    func testRangeFallbackRejectsMissingOrNonEnglishText() {
+        for text: String? in [nil, "", "  ", "中文"] {
+            XCTAssertNil(SelectionText.read(direct: nil, range: CFRange(location: 0, length: 2)) { text })
+        }
+    }
 }

@@ -15,11 +15,16 @@ struct SelectionCaptureRequest {
     let primaryTop: CGFloat
     let trigger: Trigger
 
-    /// 使用触发时的位置等待选区稳定，不再采样用户随后移动到的位置。
+    /// 使用触发时的位置等待选区稳定；首次未读到时，等待浏览器辅助功能树刷新后重试一次。
     func readAfterDebounce(using reader: (Self) async -> SelectionSnapshot?) async -> SelectionSnapshot? {
-        do { try await Task.sleep(for: .milliseconds(180)) } catch { return nil }
-        guard !Task.isCancelled else { return nil }
-        return await reader(self)
+        for _ in 0..<2 {
+            do { try await Task.sleep(for: .milliseconds(180)) } catch { return nil }
+            guard !Task.isCancelled else { return nil }
+            if let snapshot = await reader(self) {
+                return Task.isCancelled ? nil : snapshot
+            }
+        }
+        return nil
     }
 
     /// 鼠标取词校验松开处，键盘取词按选区定位，避免受无关鼠标位置影响。
@@ -39,11 +44,30 @@ struct SelectionCaptureRequest {
     }
 }
 
+enum SelectionText {
+    /// 优先使用已选文本；应用只提供有效选区范围时，通过公开范围接口读取，排除空光标和非英文。
+    static func read(direct: String?, range: CFRange?, readRange: () -> String?) -> String? {
+        let text: String?
+        if let direct, !direct.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            text = direct
+        } else if let range, range.location >= 0, range.length > 0,
+                  range.location <= Int.max - range.length {
+            text = readRange()
+        } else {
+            return nil
+        }
+        guard let text, text.range(of: "[A-Za-z]", options: .regularExpression) != nil else { return nil }
+        return text
+    }
+}
+
 actor SelectionReader {
     /// 在后台串行读取当前应用选区，限制树遍历规模及辅助功能调用超时。
     func capture(_ request: SelectionCaptureRequest) -> SelectionSnapshot? {
         let application = AXUIElementCreateApplication(request.processID)
         AXUIElementSetMessagingTimeout(application, 0.12)
+        // Chromium 在客户端读取应用角色时按需启用辅助功能；随后一次重试等待网页树就绪。
+        _ = attribute(application, kAXRoleAttribute)
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.12)
         let focused = elementAttribute(application, kAXFocusedUIElementAttribute)
@@ -93,12 +117,26 @@ actor SelectionReader {
     private func selected(_ element: AXUIElement, request: SelectionCaptureRequest) -> SelectionSnapshot? {
         var actualPID: pid_t = 0
         AXUIElementGetPid(element, &actualPID)
-        guard actualPID == request.processID,
-              let text = attribute(element, kAXSelectedTextAttribute) as? String,
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              text.range(of: "[A-Za-z]", options: .regularExpression) != nil else { return nil }
+        guard actualPID == request.processID else { return nil }
+        let direct = attribute(element, kAXSelectedTextAttribute) as? String
+        let rangeValue = attribute(element, kAXSelectedTextRangeAttribute)
+        var selectedRange: CFRange?
+        if let rangeValue, CFGetTypeID(rangeValue) == AXValueGetTypeID() {
+            let value = rangeValue as! AXValue
+            var range = CFRange()
+            if AXValueGetType(value) == .cfRange, AXValueGetValue(value, .cfRange, &range) {
+                selectedRange = range
+            }
+        }
+        guard let text = SelectionText.read(direct: direct, range: selectedRange, readRange: {
+            guard let rangeValue else { return nil }
+            var value: CFTypeRef?
+            guard AXUIElementCopyParameterizedAttributeValue(element,
+                kAXStringForRangeParameterizedAttribute as CFString, rangeValue, &value) == .success else { return nil }
+            return value as? String
+        }) else { return nil }
         var selectionBounds: CGRect?
-        if let range = attribute(element, kAXSelectedTextRangeAttribute) {
+        if selectedRange != nil, let range = rangeValue {
             var bounds: CFTypeRef?
             let status = AXUIElementCopyParameterizedAttributeValue(element,
                 kAXBoundsForRangeParameterizedAttribute as CFString, range, &bounds)
@@ -201,7 +239,7 @@ final class SelectionService {
             guard !Task.isCancelled, self.generation.contains(identifier), self.state?.paused == false,
                   NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
             guard let snapshot else {
-                self.state?.selectionStatus = "\(name) 未提供可读取的英文选区，可用「翻译剪贴板」"
+                self.state?.selectionStatus = "未读到 \(name) 的英文选区，请重新划词；或复制后使用「翻译剪贴板」"
                 return
             }
             self.state?.selectionStatus = "已读取 \(name) 选区"
