@@ -464,7 +464,7 @@ struct SettingsView: View {
                     Button("手动翻译") { state.showPanel?(.input, nil) }.buttonStyle(.borderedProminent)
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("HyperTranslate 1.0.8").font(.system(size: 12, weight: .medium))
+                    Text("HyperTranslate 1.0.9").font(.system(size: 12, weight: .medium))
                     Text("ECDICT · Free Dictionary API / Wiktionary\n不保存翻译历史，只缓存例句及其中文译文。")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                     Button("查看第三方来源与许可") {
